@@ -2,7 +2,7 @@ this-mk:=$(lastword $(MAKEFILE_LIST))
 this-dir:=$(realpath $(dir $(this-mk)))
 top-dir:=$(realpath $(this-dir)/..)
 
-SHELL := fish
+#SHELL := fish
 
 #: install in the home
 install:

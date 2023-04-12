@@ -8,60 +8,77 @@ launch-agents-mk := $(this-mk)
 
 include tmuxinator.mk
 
-environment~%: label = $(USER).environment
-environment~%: program = /bin/sh
-environment~%: arguments = launchctl setenv PATH $(PATH)
+define nl :=
 
-home.tmux~%: label = $(USER).tmux.home
+endef
+
+environment~%: label = $(USER).environment
+environment~%: respawn = false
+environment~%: program = /bin/sh
+environment~%: arguments  = -x -e -c
+environment~%: commands  =
+environment~%: commands += launchctl setenv PATH $(PATH);
+environment~%: commands += launchctl setenv XDG_CACHE_HOME /Users/$(USER)/Library/Caches;
+environment~%: commands += launchctl setenv XDG_STATE_HOME /Users/$(USER)/Library/States;
+environment~%: commands += launchctl setenv XDG_CONFIG_HOME /Users/$(USER)/Library/Preferences;
+environment~%: commands += launchctl setenv XDG_RUNTIME_DIR /Users/$(USER)/Library/Runs;
+environment~%: commands += launchctl setenv XDG_DATA_HOME /Users/$(USER)/Library/ApplicationSupport;
+
+home.tmux~%: label = $(USER).home.tmux
 home.tmux~%: program = /usr/local/bin/tmuxinator
 home.tmux~%: arguments = start home
 
-home.tmux~load: $(HOME)/.tmuxinator/home.yml
-home.tmux~load: $(HOME)/.termcap
+home.tmux~bootstrap: $(HOME)/.tmuxinator/home.yml
+home.tmux~bootstrap: $(HOME)/.termcap
 
-work.tmux~%: label = $(USER).tmux.work
+home.emacs~%: label = $(USER).home.emacs
+home.emacs~%: program = /usr/local/bin/emacs
+home.emacs~%: arguments = --bg-daemon=note
+
+work.tmux~%: label = $(USER).work.tmux
 work.tmux~%: program = /usr/local/bin/tmuxinator
 work.tmux~%: arguments = start work
 
-work.tmux~load: $(HOME)/.tmuxinator/work.yml
-home.tmux~load: $(HOME)/.termcap
+work.tmux~bootstrap: $(HOME)/.tmuxinator/work.yml
+work.tmux~bootstrap: $(HOME)/.termcap
 
-code.emacs~%: label = $(USER).emacs.code
-code.emacs~%: program = /usr/local/bin/emacs
-code.emacs~%: arguments = --bg-daemon=code
-
-note.emacs~%: label = $(USER).emacs.note
-note.emacs~%: program = /usr/local/bin/emacs
-note.emacs~%: arguments = --bg-daemon=note
+work.emacs~%: label = $(USER).work.emacs
+work.emacs~%: program = /usr/local/bin/emacs
+work.emacs~%: arguments = --bg-daemon=code
 
 launch-agents-dir := $(HOME)/Library/LaunchAgents
 
-launch-agents := environment home.tmux work.tmux code.emacs note.emacs
+launch-agents := environment home.tmux work.tmux work.emacs home.emacs
 
 define launch-agents-targets-variable =
 launch-agents-$(target)-targets := $(foreach agent,$(launch-agents),$(agent)~$(target))
 endef
 
-$(foreach target,check load unload list,$(eval $(call launch-agents-targets-variable)))
+
+$(foreach target,check bootstrap bootout list,$(eval $(call launch-agents-targets-variable)))
+
+launch-agents-domain := gui/$(shell id -u)
 
 define launch-agents-rules =
-(launch-agents-dir)/%: %
-	cp $$(<) $$(@)
-
-$(launch-agents-check-targets): %~check: $(USER).%.plist
+$(launch-agents-check-targets): %~check: $(launch-agents-dir)/$(USER).%.plist
 	plutil $$(<)
 .PHONY: $(launch-agents-check-targets)
 
-install: $(launch-agents-load-targets)
-$(launch-agents-load-targets): %~load : $(launch-agents-dir)/$(USER).%.plist
-	launchctl load -w $$(<)
-.PHONY: $(launch-agents-load-targets)
+bootstrap: $(launch-agents-bootstrap-targets)
 
-uninstall: $(launch-agents-unload-targets)
-$(launch-agents-unload-targets): %~unload: $(launch-agents-dir)/$(USER).%.plist
-	launchctl unload -w $$(<)
+%~bootstrap: uid=$(id -u)
+
+$(launch-agents-bootstrap-targets): %~bootstrap : $(launch-agents-dir)/$(USER).%.plist
+	launchctl bootstrap $(launch-agents-domain) $$(<)
+.PHONY: $(launch-agents-bootstrap-targets)
+
+bootout: $(launch-agents-bootout-targets)
+
+
+$(launch-agents-bootout-targets): %~bootout: $(launch-agents-dir)/$(USER).%.plist
+	-launchctl bootout $(launch-agents-domain) $$(<)
 	rm -f $$(<)
-.PHONY: $(launch-agents-unload-targets)
+.PHONY: $(launch-agents-bootout-targets)
 
 $(launch-agents-list-targets): %~list: $(launch-agents-dir)/$(USER).%.plist
 	launchctl list $$(*:-=.)
@@ -70,48 +87,11 @@ endef
 
 $(eval $(call launch-agents-rules))
 
-%.plist:
+$(launch-agents-dir)/$(USER).%.plist: respawn=true
+
+$(launch-agents-dir)/$(USER).%.plist:
 	@: $(call check-variable-defined,label program arguments)
 	$(file >$(@),$(launch-agents-template))
-
-define environment-template =
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- tmux/byobu new-session new-session -d -s login -m emacsclient --tty-->
-<plist version="1.0">
-  <dict>
-    <key>Label</key>
-    <string>$(USER).environment</string>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <dict>
-      <key>SuccessfulExit</key>
-      <false/>
-      <key>Crashed</key>
-      <true/>
-    </dict>
-    <key>ProcessType</key>
-    <string>Standard</string>
-    <key>EnableGlobbing</key>
-    <true/>
-    <key>WorkingDirectory</key>
-    <string>/Users/$(USER)</string>
-    <key>Program</key>
-    <string>/bin/sh</string>
-    <key>ProgramArguments</key>
-    <array>
-      <string>sh</string>
-      <string>-c</string>
-      <string>launchctl launchctl setenv PATH $(PATH)</string>
-    </array>
-    <key>StandardOutPath</key>
-    <string>/Users/$(USER)/.local/var/log/$(USER).environment.out</string>
-    <key>StandardErrorPath</key>
-    <string>/Users/$(USER)/.local/var/log/$(USER).environment.err</string>
-  </dict>
-</plist>
-endef
 
 define launch-agents-template =
 <?xml version="1.0" encoding="UTF-8"?>
@@ -121,16 +101,16 @@ define launch-agents-template =
   <dict>
     <key>Label</key>
     <string>$(label)</string>
-    <key>RunAtLoad</key>
+    <key>RunAtBootstrap</key>
     <true/>
     <key>KeepAlive</key>
     <dict>
       <key>SuccessfulExit</key>
-      <false/>
+      <$(respawn)/>
       <key>Crashed</key>
       <true/>
       <key>OtherJobEnabled</key>
-      <string>nuxeo.environment</string>
+      <string>$(USER).environment</string>
     </dict>
     <key>ProcessType</key>
     <string>Background</string>
@@ -143,7 +123,8 @@ define launch-agents-template =
     <key>ProgramArguments</key>
     <array>
       <string>$(notdir $(program))</string>
-      $(foreach word,$(arguments),<string>$(word)</string>)
+$(foreach string,$(arguments),$(launch-agents-string-template))
+$(let string,$(command),$(launch-agents-string-template))
     </array>
     <key>StandardOutPath</key>
     <string>$(HOME)/.local/var/log/$(label).stdout</string>
@@ -153,5 +134,8 @@ define launch-agents-template =
 </plist>
 endef
 
+define launch-agents-string-template =
+    <string>$(string)</string>
 
+endef
 endif
